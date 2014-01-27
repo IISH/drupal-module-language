@@ -1,0 +1,214 @@
+<?php
+
+/*
+ * Make the content language configurable through the UI.
+ */
+function iish_language_language_types_info_alter(array &$language_types) {
+  if (isset($language_types[LANGUAGE_TYPE_CONTENT])) {
+    unset($language_types[LANGUAGE_TYPE_CONTENT]['fixed']);
+  }
+}
+
+/*
+ * The interface language is either Dutch (if the content language is Dutch),
+ * or English (default, all other content languages).
+ */
+function iish_language_language_init() {
+  global $language;
+  if ($language->language != 'nl') {
+    $GLOBALS[LANGUAGE_TYPE_INTERFACE] = language_default();
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function iish_language_theme() {
+  return array(
+    'iish_language_links' => array(
+      'variables' => array('links' => NULL, 'attributes' => NULL),
+    ),
+  );
+}
+
+/*
+ * Remove the translation links from the node links section.
+ * Set language and direction of the node in the HTML.
+ */
+function iish_language_node_view_alter(&$build) {
+  if (isset($build['links']['translation'])) {
+    unset($build['links']['translation']);
+  }
+  if (isset($build['body']['#language']) && ($build['body']['#language'] != 'und')) {
+    $direction = ($build['#language'] == 'fa') ? 'rtl' : 'ltr';
+    $build['#prefix'] = '<div lang="'. $build['#language'] .'" dir="'. $direction .'">';
+    $build['#suffix'] = '</div>';
+  }
+}
+
+
+function iish_language_block_info() {
+  include_once DRUPAL_ROOT . '/includes/language.inc';
+  $block = array();
+  $block[LANGUAGE_TYPE_INTERFACE] = array(
+    'info' => t('IISH Language switcher'),
+    // Not worth caching. 
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $block;
+}
+
+/*
+ * This is mostly copied from translation_node_view()
+ *
+ * Show a language switcher. 
+ * If we're viewing a node: show available translations.
+ * If not: available options are English and Dutch, to switch interface.
+ */
+function iish_language_block_view($type) {
+  if (drupal_multilingual()) {
+
+    $path = drupal_is_front_page() ? '<front>' : $_GET['q'];
+    $custom_links = language_negotiation_get_switch_links(LANGUAGE_TYPE_INTERFACE, $path);
+    $links = array();
+
+    if (preg_match("!^node/(\d+)(/.+|)!", $path, $matches)) {
+      $node = node_load((int) $matches[1]);
+
+      if (isset($node->tnid) && $translations = translation_node_get_translations($node->tnid)) {
+        $languages = language_list('enabled');
+        $languages = $languages[1];
+
+        foreach ($translations as $langcode => $translation) {
+          // Do not show links to the same node, to unpublished translations or to
+          // translations in disabled languages.
+          if ($translation->status && isset($languages[$langcode]) && $langcode != $node->language) {
+            $language = $languages[$langcode];
+            $key = "translation_$langcode";
+
+            if (isset($custom_links->links[$langcode])) {
+              $links[$key] = $custom_links->links[$langcode];
+            }
+            else {
+              $links[$key] = array(
+                'href' => "node/{$translation->nid}", 
+                'title' => $language->native, 
+                'language' => $language,
+              );
+            }
+
+            // Custom switch links are more generic than content translation links,
+            // hence we override existing attributes with the ones below.
+            $links[$key] += array('attributes' => array());
+            $attributes = array(
+              'title' => $translation->title, 
+              'class' => array('translation-link'),
+            );
+            $links[$key]['attributes'] = $attributes + $links[$key]['attributes'];
+          }
+        }
+
+      }
+    }
+
+    if ((!count($links)) && (isset($custom_links->links))) {
+      // Either we're not viewing a node, or a node with only one translation (which may be 'und').
+      global $language;
+      if ($language->language == 'en') {
+        $links['translation_nl'] = $custom_links->links['nl']; // Sure this exist?
+      } else {
+        $links['translation_en'] = $custom_links->links['en']; // Sure this exist?
+      }
+    }
+
+//    if (isset($links)) {
+    if (count($links)) {
+
+      if (count($links) > 1) {
+        // Move en and nl to the top of the list.
+        if (isset($links['translation_nl'])) {
+          $link = $links['translation_nl'];
+          unset($links['translation_nl']);
+          array_unshift($links, $link);
+        }
+        if (isset($links['translation_en'])) {
+          $link = $links['translation_en'];
+          unset($links['translation_en']);
+          array_unshift($links, $link);
+        }
+      }
+
+      drupal_add_css(drupal_get_path('module', 'locale') . '/locale.css');
+      $class = "language-switcher-iish";
+      $variables = array(
+        'links' => $links,
+        'attributes' => array('class' => array($class)),
+      );
+      $block['content'] = theme('iish_language_links', $variables);
+      $block['subject'] = t('Languages');
+      return $block;
+    }
+
+  }
+}
+
+
+/*
+ * Theme links as a 'nice menu'. First link is menuparent.
+ */
+function theme_iish_language_links($variables) {
+  $links = $variables['links'];
+  $attributes = $variables['attributes'];
+  global $language_url;
+  $output = '';
+
+  if (count($links) > 0) {
+
+    if (count($links) == 1) {
+      $output = theme('links', $variables);
+    } else {
+
+      $attributes['class'][] = 'nice-menu nice-menu-down sf-js-enabled';
+
+      $output = '<ul' . drupal_attributes($attributes) . '>';
+
+      $key = key($links);
+      $link = array_shift($links);
+
+      $class = array($key);
+      $class[] = 'menuparent';
+
+      $output .= '<li' . drupal_attributes(array('class' => $class)) . '>';
+
+      if (isset($link['href'])) {
+        // Pass in $link as $options, they share the same keys.
+        $output .= l($link['title'], $link['href'], $link);
+      }
+      elseif (!empty($link['title'])) {
+        // Some links are actually not links, but we wrap these in <span> for adding title and class attributes.
+        if (empty($link['html'])) {
+          $link['title'] = check_plain($link['title']);
+        }
+        $span_attributes = '';
+        if (isset($link['attributes'])) {
+          $span_attributes = drupal_attributes($link['attributes']);
+        }
+        $output .= '<span' . $span_attributes . '>' . $link['title'] . '</span>';
+      }
+
+      $class = "";
+      $variables = array(
+        'links' => $links,
+        'attributes' => array('class' => array($class)),
+      );
+      $output .= theme('links', $variables);
+      $output .= "</li>\n";
+      $output .= '</ul>';
+    }
+  }
+
+  return $output;
+}
+
+
+

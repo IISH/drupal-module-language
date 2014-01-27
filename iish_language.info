@@ -1,0 +1,6 @@
+name = IISH Language
+description = Language related adjustments to IISH site.
+dependencies[] = locale
+core = 7.x
+
+
