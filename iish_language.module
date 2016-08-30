@@ -196,7 +196,7 @@ function theme_iish_language_links($variables) {
         $output .= '<span' . $span_attributes . '>' . $link['title'] . '</span>';
       }
 
-      $class = "";
+      $class = "taalwissel";
       $variables = array(
         'links' => $links,
         'attributes' => array('class' => array($class)),
@@ -209,6 +209,3 @@ function theme_iish_language_links($variables) {
 
   return $output;
 }
-
-
-
